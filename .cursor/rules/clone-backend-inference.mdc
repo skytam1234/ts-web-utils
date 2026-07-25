@@ -1,0 +1,172 @@
+---
+description: Reverse-engineer backend từ FE đã clone với evidence-based contract generation
+globs: ["apps/backend/src/modules/**/*.ts", "packages/shared/schemas/**/*.ts", ".clone-ui/plan/embeds.json"]
+alwaysApply: false
+---
+
+# BE Inference from Cloned FE
+
+> Khi đã có FE clone xong (xem `clone-website.mdc` Phases 1-5), suy ra backend tương ứng.
+> Updated với evidence-based pattern từ santowilem/skills (clone-ui).
+
+## Anti-drift principle
+
+Mọi endpoint/schema generated PHẢI có evidence trong captured source — không bịa routes. Nếu section content không capturable (third-party widget, gated) → render empty body ở FE, KHÔNG tự ý tạo fake endpoints cho nó.
+
+## Workflow
+
+### 1. Inventory FE dependencies
+
+Đọc `clone/<domain>/components/` và `clone/<domain>/app/`:
+- List TẤT CẢ `fetch()` / `apiClient.*` calls
+- List TẤT CẢ form submits (with their field names + validation rules)
+- List TẤT CẢ dynamic routes cần data
+- List TẤT CẢ realtime features (WebSocket, polling, SSE)
+
+Output: `.clone-ui/plan/api-inventory.md` — append to plan folder (không tách file mới)
+
+```markdown
+| Endpoint | Method | Used in | Auth | Query/Body | Response |
+|----------|--------|---------|------|------------|----------|
+| /posts   | GET    | FeedPage | yes | ?page&limit | {data, meta} |
+| /posts   | POST   | NewPostForm | yes | CreatePostDTO | Post |
+```
+
+Cross-reference với `.clone-ui/source/embeds.json` — nếu có Senja widget thì KHÔNG tạo `/api/reviews` endpoint (data từ vendor).
+
+### 2. Define entities
+
+Từ inventory + visual inspection → ERD:
+
+```
+User {
+  id, email, name, avatarUrl
+  createdAt, updatedAt
+}
+Post {
+  id, title, content, authorId
+  published, createdAt
+}
+```
+
+Add fields ONLY khi visible in UI hoặc inferred từ form fields. Không bịa `bio`, `phone`, `address` trừ khi có trong form/input.
+
+### 3. Generate OpenAPI spec
+
+Output: `.clone-ui/plan/openapi.yaml`
+
+```yaml
+openapi: 3.1.0
+info:
+  title: <domain> Clone API
+  version: 1.0.0
+paths:
+  /api/posts:
+    get:
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PostListResponse'
+    post:
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePostDTO'
+```
+
+### 4. Generate Zod schemas
+
+Output: `packages/shared/schemas/<domain>/`
+
+```typescript
+export const PostSchema = z.object({
+  id: z.string().cuid2(),
+  title: z.string().min(1).max(200),
+  content: z.string(),
+  published: z.boolean().default(false),
+  authorId: z.string().cuid2(),
+  createdAt: z.coerce.date(),
+  updatedAt: z.coerce.date(),
+});
+
+export type Post = z.infer<typeof PostSchema>;
+
+export const CreatePostSchema = PostSchema.pick({
+  title: true,
+  content: true,
+  published: true,
+});
+export type CreatePostDTO = z.infer<typeof CreatePostSchema>;
+```
+
+**Conventions** (xem `create-shared-schema.md`):
+- Schema names: `<Entity><Action>Schema`
+- Use `.strict()` to reject unknown keys
+- Custom error messages bằng tiếng Anh
+- Reuse: `RegisterSchema = LoginSchema.extend({ name: z.string() })`
+
+### 5. Implement routes (chỉ endpoints FE dùng)
+
+Pattern (xem `controller-service-repo.mdc`):
+
+```
+apps/backend/src/modules/<domain>/
+├── <entity>.controller.ts
+├── <entity>.service.ts
+├── <entity>.repository.ts
+└── <entity>.validator.ts
+```
+
+**Quy tắc**:
+- Implement ĐỦ endpoints FE gọi
+- KHÔNG implement tính năng thừa (YAGNI)
+- Reuse existing modules (auth, users, posts)
+- Update OpenAPI spec sau khi code
+
+### 6. Wire FE to BE
+
+Trong `clone/<domain>/`:
+- Thay mock data → real API calls
+- Set `NEXT_PUBLIC_API_URL` trong `.env.local`
+- Test end-to-end với backend chạy local
+
+Verify responses match Zod schemas (Phase B parity check):
+- Same `evaluate_script` payload on FE request → BE response
+- Compare field names, types, structure
+
+## Anti-patterns
+
+- ❌ Implement full CRUD khi FE chỉ cần GET + POST
+- ❌ Skip validation — luôn có Zod schemas
+- ❌ Skip OpenAPI spec — phải có spec để AI refactor sau
+- ❌ Tự ý đổi response format (xem `api-state.mdc`)
+- ❌ Hardcode user IDs — luôn từ auth context
+- ❌ Tạo endpoints cho content từ 3rd-party embeds (Senja, Calendly...)
+- ❌ Bịa fields không có trong form/input
+
+## Open questions → ASK user
+
+Khi gặp ambiguity (KHÔNG tự quyết):
+- Cần auth/social login?
+- Cần file upload?
+- Cần realtime (Socket.io) hay polling?
+- Cần payment integration?
+- Cần email notifications?
+- Cần admin panel?
+
+## BE inference checklist
+
+- [ ] `api-inventory.md` lists all FE calls
+- [ ] ERD derived từ visible fields only
+- [ ] `openapi.yaml` complete cho all endpoints
+- [ ] Zod schemas ở `packages/shared/schemas/<domain>/`
+- [ ] Routes implement đúng theo FE usage
+- [ ] FE wired to real API (no mock data)
+- [ ] Response parity check pass (Pass B)
+- [ ] No endpoints cho 3rd-party embeds
+- [ ] No invented fields

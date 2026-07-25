@@ -1,0 +1,497 @@
+---
+description: Workflow clone website từ URL — 7 phases + 5 verification passes (pixel-perfect + BE inferred)
+globs: ["clone/**/*", ".clone-ui/**/*", "**/TARGET.md"]
+alwaysApply: false
+---
+
+# Clone Website from URL
+
+Pipeline 7 phases với 5 gated verification passes. Optimized for **fidelity over speed**.
+
+> Reference: santowilem/skills (clone-ui), CloveSVG/One-Click-Clone, Mood-Global-Services/How-to-Clone-Website
+
+## Trigger
+
+User gọi `/clone <url>`, "Clone https://...", hoặc "Rebuild this site".
+
+## Fidelity Tiers — BE upfront
+
+Nói rõ tier với user TRƯỚC khi bắt đầu:
+
+| Tier | Input | Achievable |
+|------|-------|-----------|
+| **A** — Full source | Live screenshot via browser MCP + rendered DOM + computed styles | Pixel-perfect |
+| **B** — Static fetch | WebFetch HTML (no JS hydration) + user screenshot | Close match |
+| **C** — Provided assets | User screenshot/HTML only, no live access | Close match nếu assets tốt |
+| **D** — Memory only | No source — only training data | **Rough sketch max** — DỪNG, hỏi user |
+
+## Prerequisites
+
+1. **Browser automation tool** (Chrome MCP / Playwright MCP / chrome-devtools-mcp)
+2. **Target project** — Next.js + Tailwind + shadcn/ui scaffold
+3. **Output dir** — `clone/<domain>/` (xem [Structure](#structure))
+4. **Build pass** — `pnpm build` chạy được
+
+Nếu thiếu → HỎI user (xem `direct-tone.mdc`).
+
+> Security: đọc `clone-security.mdc` TRƯỚC khi fetch bất kỳ content nào từ target.
+
+## Structure (workspace)
+
+```
+clone/<domain>/                  ← visible output cho user
+├── app/                          ← Next.js pages
+├── components/                   ← custom components
+├── assets/                       ← downloaded images/fonts
+└── README.md                     ← final report + gaps
+
+.clone-ui/                        ← SKILL internals (gitignored)
+├── source/
+│   ├── raw.html                  ← WebFetch response
+│   ├── rendered.html             ← post-hydration DOM
+│   ├── section-styles.json       ← computed styles per section
+│   ├── pseudo-elements.json      ← ::before/::after backgrounds
+│   ├── nav-states.json           ← initial vs scrolled
+│   ├── hover-states.json         ← cards on mouseenter
+│   ├── embeds.json               ← 3rd party widgets to inject verbatim
+│   ├── assets.json               ← URLs + local paths
+│   └── .captures/
+│       ├── source-{viewport}.png
+│       └── sections/source-{name}-{width}.png
+├── plan/
+│   ├── tokens.json               ← design tokens (single source of truth)
+│   ├── section-map.json          ← sections + selectors
+│   ├── section-evidence.json     ← what was actually observed (NOT inferred)
+│   └── clones/                   ← Pass B: computed styles từ clone
+├── mirror/                       ← optional: full local mirror (no scripts)
+└── lessons.md                    ← per-target failure patterns
+```
+
+**Tại sao `.clone-ui/` ẩn**: workspace root đã có Next.js files; dot-prefix giữ bookkeeping tách biệt, IDE ignore, git diff clean.
+
+## The 7-Phase Flow
+
+ĐỪNG skip phase. Mỗi phase bị skip = visible drift ở output.
+
+| # | Phase | Output |
+|---|-------|--------|
+| 0 | **Lessons** | Đọc `.clone-ui/lessons.md` nếu có |
+| 1 | **Acquire sources** | `source/raw.html`, `source/rendered.html`, screenshots |
+| 2 | **Inventory** | List interactive patterns, embeds, decorative elements |
+| 3 | **Gather** | computed styles, pseudo-elements, nav-states, assets |
+| 4 | **Plan** | `plan/tokens.json`, `plan/section-map.json`, `plan/section-evidence.json` |
+| 5 | **Implement** | Code trong `clone/<domain>/` theo plan |
+| 6 | **Verify (5 passes)** | A: sanity → B: computed-style parity → C: visual diff → D: adversarial → E: lessons |
+| 7 | **Polish** | transitions, a11y, dark mode, meta tags |
+
+## Phase 1 — Acquire Sources
+
+Capture MỌI thứ cần vào `clone/<domain>/` trước khi analyze.
+
+### Both `raw.html` AND `rendered.html`
+
+| Source | Captures | Use to detect |
+|--------|----------|---------------|
+| `raw.html` (WebFetch) | Server HTML trước JS | Embed scripts, real `<link>` tags, JSON-LD |
+| `rendered.html` (evaluate_script outerHTML) | Post-hydration DOM | Final layout, JS-injected content |
+
+**Anti-drift**: clone chỉ đọc `rendered.html` sẽ thấy Senja widget 8 cards expanded → rebuild thành 8 custom cards. Thực tế `raw.html` chỉ có 2 dòng script.
+
+### Per-section screenshots (KHÔNG skip)
+
+Whole-page screenshots không đủ cho "card badge ở đúng chỗ chưa". Loop qua từng section, scroll tới, crop viewport.
+
+### Pre-scroll cho lazy content
+
+```js
+window.scrollTo(0, document.documentElement.scrollHeight);
+await new Promise(r => setTimeout(r, 800));
+window.scrollTo(0, 0);
+await new Promise(r => setTimeout(r, 200));
+// THEN take fullpage screenshot
+```
+
+Symptom skip: source-fullpage.png có blank rectangles ở chỗ logos khách hàng.
+
+### Multiple viewports
+
+Capture ít nhất:
+- 1440px desktop (full + per-section)
+- 768px tablet (nếu layout có 3+ breakpoints)
+- 375px mobile (full + per-section)
+
+## Phase 2 — Inventory
+
+Trước khi fetch, scan cho non-static elements:
+
+| Pattern | Detect | Implication |
+|---------|--------|-------------|
+| Carousel/slider | Arrow buttons, `.swiper`, dots | Implement carousel, không static grid |
+| Video background | `<video>`, autoplay | Capture URL + poster |
+| Embedded widget | Script từ senja/calendly/elfsight | Inject verbatim, không rebuild |
+| Lazy-loaded | `loading="lazy"`, `IntersectionObserver` | Pre-scroll trước khi capture |
+| Modal/lightbox | `[data-modal]` | Inventory trigger + content riêng |
+| Tabs/accordions | `[role="tab"]`, `aria-expanded` | Capture ALL panels |
+| Animated counters | `data-count`, CountUp.js | Source = final value, không phải `0` mid-animation |
+
+### Decorative + structural (hay bị miss)
+
+| Category | Look for | Why miss |
+|----------|----------|----------|
+| Section dividers | SVG/image chevrons giữa sections | "Decorative noise" |
+| Pseudo-element bgs | Watermark patterns, gradient overlays | DOM walk không surface |
+| Form field decorations | `background-image` icons inside `<input>` | Không có `<img>` trong DOM |
+| Dropdown indicators | Caret/chevron pseudo-elements | Chỉ thấy link text |
+| Header utility items | Phone, search, language switch | Ngoài `<nav>`, dễ miss |
+
+Cho mỗi section, ghi 1 dòng check trong Phase 2 output. Nếu cell nào là "?" → quay lại Phase 1 capture thêm.
+
+## Phase 3 — Gather
+
+### Computed styles per section (THE anti-guesswork file)
+
+Largest source of drift: agent INFER colors từ context ("bg is pink so title must be white") thay vì read computed styles.
+
+Loop qua từng section, dump:
+
+```js
+for (const section of SECTION_MAP) {
+  const root = document.querySelector(section.selector);
+  const cs = getComputedStyle(root);
+  result[section.name] = {
+    container: {
+      color: cs.color,
+      backgroundColor: cs.backgroundColor,
+      backgroundImage: cs.backgroundImage,
+      maxWidth: cs.maxWidth,                // var(--ds-page-width) = 1400px
+      display: cs.display,
+      justifyContent: cs.justifyContent,
+      alignItems: cs.alignItems,
+      padding: cs.padding,
+      width: root.getBoundingClientRect().width,
+    },
+    headings: [...root.querySelectorAll('h1,h2,h3,h4')].map(h => ({
+      text: h.innerText.trim().slice(0, 80),
+      parentJustify: getComputedStyle(h.parentElement).justifyContent,
+      color: getComputedStyle(h).color,
+      fontSize: getComputedStyle(h).fontSize,
+      fontWeight: getComputedStyle(h).fontWeight,
+      lineHeight: getComputedStyle(h).lineHeight,
+      letterSpacing: getComputedStyle(h).letterSpacing,  // ← catches -3.6px tight
+      textAlign: getComputedStyle(h).textAlign,
+    })),
+    buttons: [...root.querySelectorAll('a, button')].slice(0, 12).map(b => ({
+      text: b.innerText.trim().slice(0, 80),
+      hasIcon: !!b.querySelector('svg, img'),
+      ...pick(b),
+    })),
+    images: [...root.querySelectorAll('img')].map(img => ({
+      src: img.src, alt: img.alt,
+      width: img.naturalWidth, height: img.naturalHeight,
+    })),
+  };
+}
+```
+
+**Phase 5 PHẢI đọc values từ file này**, không infer.
+
+### Pseudo-element backgrounds
+
+Walk EVERY element (cap 5000), capture `::before`/`::after`:
+
+```js
+for (const el of document.querySelectorAll('*')) {
+  for (const pseudo of ['::before', '::after']) {
+    const cs = getComputedStyle(el, pseudo);
+    if (cs.backgroundImage !== 'none' || cs.maskImage !== 'none') {
+      found.push({ selector: ..., pseudo, backgroundImage: cs.backgroundImage, ... });
+    }
+  }
+}
+```
+
+Save `.clone-ui/source/pseudo-elements.json`. Phase 5: mỗi entry có `backgroundImage` URL PHẢI render visibly.
+
+### Form input icons
+
+```js
+[...document.querySelectorAll('input, select, textarea')].map(el => ({
+  name: el.name,
+  backgroundImage: getComputedStyle(el).backgroundImage,
+  paddingLeft: getComputedStyle(el).paddingLeft,
+})).filter(f => f.backgroundImage !== 'none')
+```
+
+### Nav states (initial vs scrolled)
+
+```js
+const nav = document.querySelector('header, .site-header, nav');
+const initial = getComputedStyle(nav);
+window.scrollTo(0, 400);
+await new Promise(r => setTimeout(r, 300));
+const scrolled = getComputedStyle(nav);
+({ initial, scrolled })
+```
+
+### Hover states on cards
+
+```js
+const card = document.querySelector('[class*="card"]');
+card.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+await new Promise(r => setTimeout(r, 350));
+// capture computed styles + visible children
+```
+
+### Container width — measure, don't default
+
+Đừng assume `max-width: 1200px`. Measure tại 1440/768/375:
+
+```js
+const widths = {};
+for (const sel of ['.container', '[class*="container"]', 'main > section > div:first-child']) {
+  const el = document.querySelector(sel);
+  if (el) widths[sel] = { width: el.getBoundingClientRect().width, maxWidth: getComputedStyle(el).maxWidth };
+}
+```
+
+### Embed detection (3rd party widgets)
+
+Đọc `.clone-ui/source/raw.html`, grep cho:
+
+| Pattern | Vendor | Action |
+|---------|--------|--------|
+| `widget.senja.io` | Senja reviews | Inject `<script>` + `<div>` verbatim |
+| `static.elfsight.com` | Elfsight | Inject verbatim |
+| `youtube.com/embed/` | YouTube | Original `<iframe>` markup |
+| `calendly.com/...` | Calendly | Inject script + container |
+| `typeform.com/...` | Typeform | Verbatim iframe |
+| `instagram.com/embed.js` | Instagram feed | Verbatim script + container |
+
+Save `.clone-ui/plan/embeds.json`. Phase 5: **drop html field straight into output**, đừng try style rendered widget.
+
+### Path-flowing animations (stroke-dashoffset)
+
+Marketing pages có colored pulses chạy theo path. Anti-pattern: opacity fade-in/out (sai).
+
+Đúng technique:
+```css
+.pulse-line {
+  stroke-dasharray: 24 600;
+  stroke-dashoffset: 600;
+  animation: pulseFlow 3s linear infinite;
+}
+@keyframes pulseFlow {
+  0%   { stroke-dashoffset: 600; }
+  100% { stroke-dashoffset: -200; }
+}
+```
+
+Detect khi source path có `stroke="url(#some-pulse-gradient)"` + sibling path `stroke-opacity="0.1"`.
+
+### Brand wordmark
+
+Đừng reconstruct logo bằng HTML text + styled spans. Inspect actual logo nodes:
+
+```js
+const headerLogos = [...document.querySelectorAll('header svg, header .logo')].slice(0, 6);
+headerLogos.map(n => ({
+  tag: n.tagName,
+  isInlineSvg: n.tagName === 'SVG',
+  fullSvg: n.tagName === 'SVG' ? n.outerHTML : null,
+  src: n.getAttribute('src'),
+}));
+```
+
+- Inline SVG → save `outerHTML` verbatim, dùng y nguyên
+- Raster → download to `assets/logos/`
+- CSS text (rare) → text + spans OK
+
+## Phase 4 — Plan
+
+### 4a. Component breakdown
+
+```tsx
+<HomePage>
+  <HeroSection>
+    <Logo />
+    <NavMenu />
+    <HeadlineGroup />
+  </HeroSection>
+  <FeatureGrid /> {/* 3 cards */}
+  <Footer />
+</HomePage>
+```
+
+### 4b. Breakpoint map
+
+| Width | Behavior |
+|-------|----------|
+| ≥1280px | Desktop: 3-col grid, full nav |
+| 768-1279px | Tablet: 2-col grid, condensed nav |
+| <768px | Mobile: 1-col, hamburger |
+
+### 4c. Design tokens → `plan/tokens.json`
+
+Single source of truth. Phase 5 reads từ đây.
+
+```json
+{
+  "colors": { "primary": "#e90a8c", "ink": "#101010", "muted": "#666" },
+  "typography": {
+    "fontFamilies": { "heading": "Poppins", "body": "DM Sans" },
+    "scale": {
+      "h1": { "size": "80px", "lineHeight": "100px", "weight": 700 },
+      "body": { "size": "16px", "lineHeight": "1.6", "weight": 400 }
+    }
+  },
+  "spacing": { "base": 4, "sectionPadding": "80px", "containerMax": "1280px" },
+  "radius": { "card": "12px", "button": "999px" },
+  "motion": { "ease": "cubic-bezier(0.4, 0, 0.2, 1)", "duration": "200ms" }
+}
+```
+
+### 4d. Section map + evidence
+
+`plan/section-map.json`:
+```json
+[
+  { "name": "hero", "sourceSelector": "section.hero", "cloneSelector": "section.hero", "type": "hero" },
+  { "name": "features", "sourceSelector": "section.features", "cloneSelector": "section.features", "type": "feature-grid" }
+]
+```
+
+`plan/section-evidence.json` — **quan trọng nhất** cho anti-hallucination:
+```json
+{
+  "hero": {
+    "headline": { "text": "Sell, Buy, Rent", "evidence": "captured" },
+    "ctaButtons": [{ "text": "Get Started", "evidence": "captured" }],
+    "backgroundImage": { "value": "...", "evidence": "captured" }
+  }
+}
+```
+
+Markers `(implied)`, `(inferred)`, `(guessed)`, `(speculation)` → Phase 5 PHẢI grep evidence file, nếu feature chỉ có evidence `(implied)` → skip hoặc quay lại capture.
+
+## Phase 5 — Implement
+
+### Fidelity rules (non-negotiable)
+
+1. **Exact colors** — read từ `section-styles.json`. KHÔNG infer ("bg pink → title white" là SAI).
+2. **Exact spacing** — measure pixel gaps. `mt-3` vs `mt-4` là visible difference.
+3. **Exact font** — same family + weights. System font stack match chính xác.
+4. **Exact radius** — `rounded-md` (6px) ≠ `rounded-lg` (8px).
+5. **Exact icons** — nếu source Lucide → Lucide. Đừng substitute.
+6. **No invented content (HARD RULE)** — text verbatim. Nếu content không capturable, render empty body + HTML comment `<!-- source: testimonials, 8 reviews not capturable -->`. Forbidden:
+   - Re-use content từ section khác
+   - Free-text disclaimers rendered ("Instagram feed requires API token")
+   - Lorem ipsum, fake testimonials, fake counters
+7. **Match layout primitive** — Grid ≠ flexbox + nth-child hacks.
+8. **Preserve DOM structure** — copy `raw.html` structure verbatim, re-style. Đừng rebuild từ "what screenshot looks like":
+   - Cards: badge position (absolute? inside image? overlay?), sibling order
+   - Forms: label/input/helper-text relationships, full select-option lists
+   - Nav: header utility area (phone, search) là peer của `<nav>`, không phải inside
+   - Icon containers: nếu source bare `<svg>` không wrapper, đừng add circular pill
+   - Footer: dense decoration zone (logo, contact, links, social, newsletter, watermark)
+9. **No imposed max-width** — read container width per section.
+10. **No silent regressions** — nếu re-clone iter-N, diff against archive. Không drop features đang đúng.
+11. **Honor guesswork markers** — grep evidence file cho `(implied|inferred|guessed|speculation)` trước mỗi section.
+
+### Stack chuẩn
+
+Next.js 14+ App Router + Tailwind CSS + shadcn/ui:
+- Server Components mặc định
+- `'use client'` khi cần (forms, state, effects, browser APIs)
+- Tailwind tokens map 1:1 với `tokens.json`
+- shadcn primitives cho Button, Input, Card, Dialog...
+- Custom components trong `clone/<domain>/components/`
+
+## Phase 6 — Verify (5 gated passes)
+
+**Đọc `clone-verification.mdc` để biết chi tiết.** Summary:
+
+| Pass | What | Cost | Catches |
+|------|------|------|---------|
+| **A** | Tokens + content sanity grep | Cheapest | Stray hex, missing headings, wrong asset types |
+| **B** | Computed-style parity (source vs clone, same payload) | Cheap | Color/spacing/typography mismatches eye smooths over |
+| **C** | Per-section visual diff loop (cap 3 iter per section) | Medium | Layout, structure, decorative pseudo-elements |
+| **D** | Adversarial sub-agent review | Medium | Hallucinations, regressions, blind-spot errors |
+| **E** | Drift report + lessons append | Cheap | Compounding learnings for next iter |
+
+**Bạn KHÔNG ĐƯỢC skip pass.** A finds khác drifts B finds khác D finds.
+
+Cap per-section visual loop: **3 iterations** để không run forever.
+
+## Phase 7 — Polish
+
+Last 10% — distinguish "implemented" từ "shipped":
+- Hover transitions match source's easing + duration
+- Focus rings visible + accessible
+- Touch targets ≥ 44px on mobile
+- `prefers-reduced-motion` respects
+- Dark mode (nếu source supports và stack hỗ trợ)
+- Image `alt` attributes (đừng `alt=""` on meaningful imagery)
+- `<title>` + meta tags
+
+## Output — Final report
+
+Khi xong, viết `clone/<domain>/README.md`:
+
+```markdown
+# Clone: <domain>
+
+Source: https://...
+Captured: <date>
+Fidelity: ~X% (Tier A/B/C)
+
+## Sections cloned
+| Section | Status | Notes |
+|---------|--------|-------|
+| Header | ✅ | |
+| Hero | ⚠️ | Video bg fallback to poster |
+| Testimonials | ❌ | Senja widget not capturable, empty body |
+
+## BE endpoints added
+- POST /api/...
+- GET /api/...
+
+## Known gaps
+- Testimonials: 8 reviews not capturable, rendered empty with comment
+- Footer social icons: substituted Lucide (source CDN unreachable)
+
+## Setup
+\`\`\`bash
+pnpm --filter frontend dev
+# Visit http://localhost:3000/clone/<domain>
+\`\`\`
+```
+
+## Working rules
+
+- **Recon data là source of truth** — không bịa pixel values
+- **1 section = 1 builder** — chia song song nếu được
+- **Save intermediate state** — checkpoint sau mỗi phase
+- **Honest QA** — báo gap ngay, không fake "matches perfectly"
+- **No hardcoded assets** — download về `assets/`
+- **Respect copyright** — clone cho dev/learning, không deploy production
+
+## Forbidden
+
+- ❌ Bịa colors/fonts/spacing không có trong research
+- ❌ Skip Phase 6 verification passes
+- ❌ Copy assets URL nguyên xi (luôn download)
+- ❌ Dùng `any`, `@ts-ignore`
+- ❌ Skip accessibility
+- ❌ Bỏ qua BE inference phase
+- ❌ Render content không có trong `raw.html` hoặc content inventory
+- ❌ Impose `max-width: 1200px` lên mọi thứ
+- ❌ Treat pseudo-elements as "decorative noise"
+- ❌ Skip Pass D adversarial review
+
+## Reference projects
+
+- [santowilem/skills (clone-ui)](https://github.com/santowilem/skills) — 1846-line SKILL.md, anti-hallucination, 5-pass
+- [CloveSVG/One-Click-Clone](https://github.com/CloveSVG/One-Click-Clone) — 6-step pipeline, parallel agents
+- [Mood-Global-Services/How-to-Clone-Website](https://github.com/Mood-Global-Services/How-to-Clone-Website---Claude-Skills) — Chrome MCP, TARGET.md config
+- [andrewriveradev/awesome-clones](https://github.com/andrewriveradev/awesome-clones)
+- [GorvGoyl/clone-wars](https://github.com/GorvGoyl/clone-wars)

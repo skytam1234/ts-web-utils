@@ -1,0 +1,119 @@
+---
+description: Prisma ORM usage, schema design, query optimization
+globs: ["apps/backend/prisma/**/*.prisma", "apps/backend/src/**/*repository*.ts"]
+alwaysApply: true
+---
+
+# Prisma Best Practices
+
+## Schema Conventions
+- Model names: **PascalCase**, singular (`User`, not `Users`)
+- Field names: **camelCase**
+- Use `@id`, `@unique`, `@relation` properly
+- Always include `createdAt` and `updatedAt` (use `@updatedAt`)
+- Use soft delete with `deletedAt DateTime?` when needed
+- Index foreign keys and frequently queried fields
+
+```prisma
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String
+  posts     Post[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([email])
+  @@map("users")
+}
+```
+
+## Query Patterns
+
+### Select only needed fields
+```typescript
+// ✅ GOOD
+const users = await prisma.user.findMany({
+  select: { id: true, email: true, name: true },
+});
+
+// ❌ BAD - fetches everything
+const users = await prisma.user.findMany();
+```
+
+### Pagination
+```typescript
+const PAGE_SIZE = 20;
+
+const [items, total] = await Promise.all([
+  prisma.post.findMany({
+    skip: (page - 1) * PAGE_SIZE,
+    take: PAGE_SIZE,
+    orderBy: { createdAt: 'desc' },
+  }),
+  prisma.post.count(),
+]);
+```
+
+### Avoid N+1
+```typescript
+// ✅ GOOD: Use include/select
+const posts = await prisma.post.findMany({
+  include: { author: { select: { id: true, name: true } } },
+});
+
+// ❌ BAD: N+1 queries
+const posts = await prisma.post.findMany();
+for (const post of posts) {
+  post.author = await prisma.user.findUnique({ where: { id: post.authorId } });
+}
+```
+
+### Transactions
+```typescript
+// ✅ Use transactions for multi-step operations
+await prisma.$transaction(async (tx) => {
+  const user = await tx.user.create({ data: userData });
+  await tx.profile.create({ data: { userId: user.id, ...profileData } });
+  return user;
+});
+```
+
+## Migrations
+```bash
+# Create migration
+pnpm --filter backend prisma migrate dev --name add_user_table
+
+# Apply to production
+pnpm --filter backend prisma migrate deploy
+
+# Reset DB (dev only)
+pnpm --filter backend prisma migrate reset
+```
+
+## Type Safety
+```typescript
+// ✅ Use generated types
+import { Prisma, User } from '@prisma/client';
+import { UserRepository } from './user.repository';
+
+async create(data: Prisma.UserCreateInput): Promise<User> { ... }
+
+// ✅ Use Prisma.UserWhereInput for complex filters
+```
+
+## Soft Delete
+```prisma
+model Post {
+  id        String    @id @default(cuid())
+  deletedAt DateTime?
+  // ...
+}
+```
+
+```typescript
+// Always filter by deletedAt: null
+prisma.post.findMany({ where: { deletedAt: null } });
+
+// Use Prisma middleware for global filter
+```

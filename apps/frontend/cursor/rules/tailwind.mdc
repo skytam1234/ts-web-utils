@@ -1,0 +1,83 @@
+---
+description: Tailwind CSS conventions
+globs: ["apps/frontend/src/**/*.tsx"]
+alwaysApply: true
+---
+
+# Tailwind CSS Conventions
+
+## Order of classes
+1. Layout (flex, grid, position)
+2. Sizing (w-, h-, max-)
+3. Spacing (p-, m-, gap-)
+4. Typography (text-, font-)
+5. Colors (bg-, text-)
+6. Borders & Effects (border, shadow, rounded)
+7. States (hover:, focus:, disabled:)
+8. Responsive (sm:, md:, lg:)
+
+```tsx
+// ✅ GOOD - readable order
+<div className="flex items-center justify-between w-full p-4 text-sm font-medium text-gray-900 bg-white rounded-lg shadow-sm hover:bg-gray-50 md:p-6">
+
+// ❌ BAD - messy order
+<div className="text-sm p-4 bg-white flex md:p-6 w-full text-gray-900 ...">
+```
+
+## Use `cn` helper
+```typescript
+// lib/cn.ts
+import { clsx, type ClassValue } from 'clsx';
+import { twMerge } from 'tailwind-merge';
+
+export function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs));
+}
+
+// Usage
+<div className={cn('base-class', isActive && 'active-class', className)} />
+```
+
+## Component variants (cva)
+```typescript
+import { cva, type VariantProps } from 'class-variance-authority';
+
+const buttonVariants = cva(
+  'inline-flex items-center justify-center rounded-md font-medium',
+  {
+    variants: {
+      variant: {
+        primary: 'bg-blue-600 text-white hover:bg-blue-700',
+        secondary: 'bg-gray-200 text-gray-900 hover:bg-gray-300',
+        ghost: 'hover:bg-gray-100',
+      },
+      size: {
+        sm: 'h-8 px-3 text-sm',
+        md: 'h-10 px-4',
+        lg: 'h-12 px-6 text-lg',
+      },
+    },
+    defaultVariants: { variant: 'primary', size: 'md' },
+  }
+);
+```
+
+## Responsive Design
+- **Mobile first**: Default styles cho mobile, dùng `md:`, `lg:` để scale up
+- Use `container mx-auto px-4` cho main content
+- Common breakpoints: `sm:` 640, `md:` 768, `lg:` 1024, `xl:` 1280
+
+## Dark Mode
+- Use `dark:` prefix
+- Configure trong `tailwind.config.ts` (class strategy)
+- Toggle qua Zustand store hoặc `next-themes`
+
+```tsx
+<div className="bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100">
+```
+
+## Avoid
+- ❌ `@apply` overuse (chỉ dùng cho base components)
+- ❌ Inline styles
+- ❌ CSS modules (dùng Tailwind utilities)
+- ❌ Magic numbers - extract to config

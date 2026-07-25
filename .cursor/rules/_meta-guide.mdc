@@ -1,0 +1,113 @@
+---
+description: Meta-guide for writing effective Cursor rules (always-apply for contributors)
+globs: [".cursor/rules/**/*.mdc"]
+alwaysApply: false
+---
+
+# Meta-Guide: How to Write Cursor Rules
+
+## Core Principles
+
+### 1. Mỗi rule một chủ đề
+- ✅ Một file = một concern (e.g., `prisma.mdc`, `nextjs-routing.mdc`)
+- ❌ KHÔNG nhét 10 thứ vào 1 file
+
+### 2. Giữ file ngắn gọn
+- **Target**: < 200 dòng
+- **Max**: 500 dòng (Cursor official recommendation)
+- Nếu vượt 200 dòng → tách thành nhiều files
+
+### 3. Frontmatter bắt buộc
+Mỗi `.mdc` PHẢI có:
+```yaml
+---
+description: Mô tả ngắn gọn (1 câu) - Cursor dùng để quyết định khi nào apply
+globs: ["pattern/**/*.ts"]  # HOẶC
+alwaysApply: true            # HOẶC cả hai
+---
+```
+
+### 4. Activation modes
+
+| Mode | Khi nào dùng | Kích hoạt |
+|------|-------------|-----------|
+| `alwaysApply: true` | Quy tắc chung cho mọi context | Mọi chat |
+| `globs: ["..."]` | Rules cho loại file cụ thể | Auto khi edit file match |
+| `description` only | Rules chuyên biệt, AI tự quyết | AI decide dựa trên description |
+
+### 5. Cấu trúc nội dung mỗi rule
+
+```
+1. Title rõ ràng
+2. Khi nào áp dụng (nếu không obvious từ globs)
+3. ✅ DO - code examples
+4. ❌ DON'T - code examples
+5. Lý do / Giải thích (optional)
+```
+
+### 6. Code examples phải PRACTICAL
+- ✅ Copy-paste được vào dự án thực
+- ❌ KHÔNG ví dụ generic kiểu "hello world"
+
+### 7. Reference files, đừng copy
+- ✅ Link tới file: `apps/backend/src/services/user.service.ts`
+- ❌ KHÔNG copy nguyên file code vào rule
+
+### 8. Naming convention
+- **kebab-case** cho file names: `prisma-best-practices.mdc`
+- Prefix `_` cho meta-rules: `_meta-guide.mdc`, `_index.mdc`
+
+## Templates
+
+### Rule cho file-specific (globs)
+```yaml
+---
+description: Backend controller patterns
+globs: ["apps/backend/src/controllers/**/*.ts"]
+alwaysApply: false
+---
+
+# Controller Patterns
+
+## DO
+[code examples]
+
+## DON'T
+[bad examples]
+```
+
+### Rule always-apply (ngắn gọn)
+```yaml
+---
+description: Critical project-wide rules
+alwaysApply: true
+---
+
+# Critical Rules
+
+- Rule 1
+- Rule 2
+- Rule 3
+```
+
+### Rule agent-requested (mô tả rõ)
+```yaml
+---
+description: How to create Prisma migrations safely
+alwaysApply: false
+---
+
+# Prisma Migration Workflow
+
+[content]
+```
+
+## Self-check trước khi commit rule
+
+- [ ] File < 200 dòng?
+- [ ] Frontmatter đầy đủ?
+- [ ] Description rõ ràng, 1 câu?
+- [ ] Có code examples không?
+- [ ] Không trùng với rule khác?
+- [ ] Tên file kebab-case?
+- [ ] Đã test rule trong Cursor chưa?

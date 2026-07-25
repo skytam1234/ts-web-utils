@@ -1,0 +1,138 @@
+---
+description: React component patterns & rules
+globs: ["apps/frontend/src/components/**/*.tsx"]
+alwaysApply: true
+---
+
+# React Component Patterns
+
+## Component Structure
+```tsx
+'use client'; // Only if needed
+
+// 1. Imports (external → internal → types)
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { Button } from '@/components/ui/button';
+import type { Post } from '@e-clone/shared/types';
+
+// 2. Types
+interface PostCardProps {
+  post: Post;
+  onLike?: (id: string) => void;
+  isLoading?: boolean;
+}
+
+// 3. Component
+export function PostCard({ post, onLike, isLoading = false }: PostCardProps) {
+  // Hooks first
+  const router = useRouter();
+  const [isLiked, setIsLiked] = useState(false);
+
+  // Handlers
+  const handleLike = () => {
+    setIsLiked(true);
+    onLike?.(post.id);
+  };
+
+  // Render
+  return (
+    <article className="...">
+      <h2>{post.title}</h2>
+      <Button onClick={handleLike} disabled={isLoading}>
+        {isLiked ? 'Liked' : 'Like'}
+      </Button>
+    </article>
+  );
+}
+```
+
+## Component Rules
+
+### ✅ DO
+- Props destructured với defaults
+- Use `forwardRef` for ref forwarding
+- Memoize expensive components (`memo`, `useMemo`)
+- Use `useCallback` cho handlers passed as props
+- Use semantic HTML (`<article>`, `<nav>`, `<section>`)
+- Accessibility: aria labels, keyboard nav, focus management
+
+### ❌ DON'T
+- Don't use default exports (except page/layout)
+- Don't mutate props
+- Don't use `any` types
+- Don't fetch data in `useEffect` (use SWR/TanStack Query)
+- Don't use inline styles (use Tailwind)
+- Don't use index as key
+
+## Reusability
+
+### Extract early but not too early
+- ✅ Nếu component có nhiều props/state → extract
+- ✅ Nếu component bị duplicate → extract to `common/`
+- ❌ Đừng extract chỉ vì muốn modular
+
+### Composition > Configuration
+```tsx
+// ✅ GOOD: Composition
+<Card>
+  <Card.Header>Title</Card.Header>
+  <Card.Body>Content</Card.Body>
+</Card>
+
+// ❌ BAD: Too many props
+<Card
+  title="Title"
+  body="Content"
+  showHeader
+  showFooter
+  headerStyle="bold"
+/>
+```
+
+## Performance
+```tsx
+// ✅ Memoize expensive computations
+const sortedPosts = useMemo(
+  () => posts.sort((a, b) => b.createdAt - a.createdAt),
+  [posts]
+);
+
+// ✅ Memoize callbacks
+const handleClick = useCallback((id: string) => {
+  // ...
+}, [/* deps */]);
+
+// ✅ Lazy load heavy components
+const HeavyChart = lazy(() => import('./HeavyChart'));
+```
+
+## Forms (React Hook Form + Zod)
+```tsx
+'use client';
+
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
+import { LoginSchema } from '@e-clone/shared/schemas';
+
+type LoginForm = z.infer<typeof LoginSchema>;
+
+export function LoginForm() {
+  const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<LoginForm>({
+    resolver: zodResolver(LoginSchema),
+  });
+
+  const onSubmit = async (data: LoginForm) => {
+    await authService.login(data);
+  };
+
+  return (
+    <form onSubmit={handleSubmit(onSubmit)}>
+      <input {...register('email')} />
+      {errors.email && <span>{errors.email.message}</span>}
+      {/* ... */}
+    </form>
+  );
+}
+```

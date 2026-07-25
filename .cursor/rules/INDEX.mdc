@@ -1,0 +1,80 @@
+---
+description: Rule index - routing table for AI to discover relevant rules
+alwaysApply: false
+---
+
+# Cursor Rules Index
+
+Bảng tra cứu để AI nhanh chóng tìm rule phù hợp với task.
+
+## 🌐 Global Rules (`.cursor/rules/`)
+
+| Task | Load rule |
+|------|-----------|
+| Project context, conventions | `ai-behavior.mdc` |
+| TypeScript style | `typescript-style.mdc` |
+| Git workflow / commits | `git-workflow.mdc` |
+| AI behavior (ask vs act) | `ai-behavior.mdc` |
+| Cách viết rule | `_meta-guide.mdc` |
+| Tone khi reply | `direct-tone.mdc` |
+| **Clone website từ URL** | **`clone-website.mdc`** |
+| **Clone security model** | **`clone-security.mdc`** |
+| **Clone verification (5 passes)** | **`clone-verification.mdc`** |
+| **BE inference từ FE clone** | **`clone-backend-inference.mdc`** |
+
+## ⚙️ Backend Rules (`apps/backend/cursor/rules/`)
+
+| Task | Load rule |
+|------|-----------|
+| Architecture, layered design | `architecture.mdc` |
+| Controller/Service/Repository patterns | `controller-service-repo.mdc` |
+| Prisma queries, migrations | `prisma.mdc` |
+| Socket.io real-time | `socket-io.mdc` |
+| Create background job | `../skills/create-job.md` |
+
+## 🎨 Frontend Rules (`apps/frontend/cursor/rules/`)
+
+| Task | Load rule |
+|------|-----------|
+| Next.js App Router | `nextjs-architecture.mdc` |
+| React components | `react-patterns.mdc` |
+| Tailwind CSS | `tailwind.mdc` |
+| API services, Zustand | `api-state.mdc` |
+| Create component | `../skills/create-component.md` |
+| Create page | `../skills/create-page.md` |
+
+## 🤖 Agents (chuyên môn riêng)
+
+| Task | Use agent |
+|------|-----------|
+| Backend-specific | `apps/backend/cursor/agents/backend-specialist.md` |
+| Frontend-specific | `apps/frontend/cursor/agents/frontend-specialist.md` |
+| **Clone website from URL** | **`agents/clone-specialist.md`** |
+| General / cross-cutting | `agents/general.md` |
+
+## Quick lookup by action
+
+### "Tôi muốn tạo..."
+- **API endpoint** → `backend:architecture.mdc` + `controller-service-repo.mdc`
+- **React component** → `frontend:react-patterns.mdc` + `frontend:create-component.md`
+- **Next.js page** → `frontend:create-page.md`
+- **Prisma migration** → `backend:prisma.mdc`
+- **Socket.io event** → `backend:socket-io.mdc`
+- **Background job** → `backend:create-job.md`
+- **Zod schema** → `global:create-shared-schema.md`
+- **Clone website từ URL** → **`global:clone.md`** + `clone-website.mdc`
+
+### "Tôi muốn fix..."
+- **Bug** → `global:debug.md`
+- **TypeScript error** → `global:typescript-style.mdc`
+- **React error** → `frontend:react-patterns.mdc`
+
+### "Tôi muốn review..."
+- **Code chất lượng** → `global:code-review.md`
+- **Backend code** → `backend:backend-specialist.md`
+- **Frontend code** → `frontend:frontend-specialist.md`
+
+### "Tôi muốn viết..."
+- **README/docs** → `global:write-docs.md`
+- **Commit message** → `global:git-workflow.mdc`
+- **Rule mới** → `global:_meta-guide.mdc`

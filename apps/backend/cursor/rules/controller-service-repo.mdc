@@ -1,0 +1,110 @@
+---
+description: Express controllers, services, repositories patterns
+globs: ["apps/backend/src/controllers/**/*.ts", "apps/backend/src/services/**/*.ts", "apps/backend/src/repositories/**/*.ts"]
+alwaysApply: true
+---
+
+# Backend Code Patterns
+
+## Controller Rules
+1. **THIN** - chỉ handle req/res, delegate to services
+2. Always `try/catch` hoặc pass errors to `next()`
+3. Use `req.body` sau khi đã validate (Zod inferred type)
+4. Return consistent response format
+5. Không gọi trực tiếp Prisma - phải qua service
+
+```typescript
+// ✅ Controller template
+export const handlerName = async (
+  req: Request<Params, ResBody, ReqBody>,
+  res: Response<ApiResponse<ResBody>>,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const result = await service.method(req.body);
+    res.status(200).json({ success: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+};
+```
+
+## Service Rules
+1. **THICK** - chứa business logic
+2. Throw custom errors, không return error objects
+3. Orchestrate multiple repositories
+4. Emit events cho decoupled logic
+5. Inject dependencies qua constructor
+
+```typescript
+export class PostService {
+  constructor(
+    private postRepo: PostRepository,
+    private userRepo: UserRepository,
+    private eventBus: EventEmitter,
+  ) {}
+
+  async create(authorId: string, dto: CreatePostDTO): Promise<Post> {
+    const author = await this.userRepo.findById(authorId);
+    if (!author) throw new NotFoundError('User');
+
+    const post = await this.postRepo.create({ ...dto, authorId });
+    this.eventBus.emit('post.created', post);
+
+    return post;
+  }
+}
+```
+
+## Repository Rules
+1. **ONLY** place gọi Prisma
+2. Return domain types, không return raw Prisma types
+3. Methods tên rõ ràng: `findById`, `findByEmail`, `createMany`
+4. No business logic - chỉ data access
+
+```typescript
+// ✅ GOOD
+async findActiveUsers(): Promise<User[]> {
+  return this.prisma.user.findMany({ where: { isActive: true } });
+}
+
+// ❌ BAD - business logic in repo
+async findActiveUsersWithFriends(): Promise<User[]> {
+  const users = await this.prisma.user.findMany({ where: { isActive: true } });
+  return users.filter(u => u.friends.length > 0);
+}
+```
+
+## Response Format
+```typescript
+// Success
+{
+  "success": true,
+  "data": T,
+  "meta"?: { page, limit, total } // for pagination
+}
+
+// Error
+{
+  "success": false,
+  "error": {
+    "message": string,
+    "code"?: string,
+    "details"?: unknown
+  }
+}
+```
+
+## Async Patterns
+```typescript
+// ✅ Parallel
+const [user, posts] = await Promise.all([
+  userRepo.findById(id),
+  postRepo.findByUserId(id),
+]);
+
+// ✅ Sequential when dependent
+const user = await userRepo.findById(id);
+if (!user) throw new NotFoundError('User');
+const profile = await profileRepo.findByUserId(user.id);
+```

@@ -1,0 +1,75 @@
+---
+description: Global rules for TypeScript code style across all apps
+globs: ["**/*.ts", "**/*.tsx"]
+alwaysApply: true
+---
+
+# TypeScript Code Style
+
+## Type Safety
+- ❌ **NEVER** use `any` - dùng `unknown` nếu chưa biết type
+- ❌ **NEVER** use `@ts-ignore` - fix triệt để hoặc dùng `@ts-expect-error` với lý do rõ ràng
+- ✅ Always define interfaces/types cho function parameters và return values
+- ✅ Use `import type` cho type-only imports
+- ✅ Enable `strict` mode in tsconfig
+
+## Type Patterns
+```typescript
+// ✅ GOOD: Discriminated unions
+type Result<T> = { success: true; data: T } | { success: false; error: string };
+
+// ✅ GOOD: Generic constraints
+function getById<T extends { id: string }>(items: T[], id: string): T | undefined
+
+// ✅ GOOD: Branded types for IDs
+type UserId = string & { __brand: 'UserId' };
+
+// ❌ BAD: any
+function process(data: any) { ... }
+
+// ❌ BAD: optional chaining abuse
+user?.profile?.settings?.theme?.color?.toString()
+```
+
+## Naming
+- Interfaces: `IUser` hoặc `User` (chọn 1 convention, dùng `User`)
+- Types: `User`, `CreateUserDTO`, `UserResponse`
+- Enums: PascalCase keys, hoặc dùng `as const` thay vì enum
+- Constants: `UPPER_SNAKE_CASE`
+
+## Imports
+- Group imports: external → internal → types
+- Use named imports thay vì default
+- Avoid barrel files (`index.ts`) trừ khi cần thiết
+
+```typescript
+// ✅ GOOD
+import { Request, Response } from 'express';
+import { prisma } from '@/config/database';
+import type { User } from '@e-clone/shared/types';
+```
+
+## Async/Await
+- Always use `async/await` thay vì `.then()` chains
+- Always handle errors với `try/catch` hoặc error middleware
+- Use `Promise.all()` cho parallel operations
+
+## Functions
+- Keep functions small (< 50 lines)
+- Single responsibility
+- Prefer pure functions
+- Use destructuring for parameters
+
+```typescript
+// ✅ GOOD
+function createUser({ email, name, password }: CreateUserDTO): Promise<User> { ... }
+
+// ❌ BAD
+function createUser(email: string, name: string, password: string): Promise<User> { ... }
+```
+
+## Comments
+- ❌ Don't narrate what code does (`// increment i`)
+- ✅ Explain **why** not what
+- ✅ JSDoc for public APIs
+- ✅ TODO comments must have owner: `// TODO(username): ...`

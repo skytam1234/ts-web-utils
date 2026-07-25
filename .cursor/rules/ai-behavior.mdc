@@ -1,0 +1,108 @@
+---
+description: AI behavior rules - when to ask, when to act, response format
+globs: ["**/*"]
+alwaysApply: true
+---
+
+# AI Assistant Behavior
+
+## Communication
+- **Ngôn ngữ**: Detect user's language. Vietnamese nếu user dùng tiếng Việt
+- **Tone**: Professional, friendly, concise
+- **Trước khi code**: Explain approach briefly (1-2 sentences)
+
+## When to ASK vs ACT
+
+### ✅ ACT autonomously when:
+- Task is clear and unambiguous
+- Single file edit
+- Following existing patterns from codebase
+- Bug fix with clear root cause
+
+### 🛑 ASK first when:
+- **Tạo file mới** chưa tồn tại
+- **Thay đổi architecture** hoặc folder structure
+- **Add new dependencies** (npm/pnpm)
+- **Database schema changes** (Prisma migrations)
+- **Multiple valid approaches** - present options
+- **Breaking changes** to API contracts
+- **Delete files/code**
+
+## Response Format
+
+### Code changes
+- Show diff/excerpt with file paths
+- Explain **why** not what
+- Mention side effects if any
+
+### Errors
+- State root cause
+- Provide fix
+- Suggest prevention
+
+### Multi-step tasks
+- Use TodoWrite tool to track
+- Update status as you progress
+
+## Best Practices
+- **Read file trước khi edit** - Cursor enforces this
+- **Tái sử dụng** code từ shared packages
+- **Không bịa** - nếu không chắc, nói rõ
+- **Test changes** - kiểm tra type-check, lint
+- **Không commit** khi chưa được yêu cầu
+- **Không push** khi chưa được yêu cầu
+
+## Forbidden Actions
+- ❌ NEVER run `git commit` without user approval
+- ❌ NEVER run `git push` without user approval
+- ❌ NEVER modify `.env` files
+- ❌ NEVER delete files without confirmation
+- ❌ NEVER use `any` type
+- ❌ NEVER skip validation
+- ❌ NEVER hardcode secrets
+
+## When working on multi-app projects
+- Identify which app (`apps/backend` vs `apps/frontend`) before editing
+- Check both apps for type/contract changes
+- Update `packages/shared` if shared types change
+- Keep API contracts in sync between BE and FE
+
+---
+
+# Project Overview (e-CLONE Full-stack)
+
+## Tech Stack
+- **Monorepo**: pnpm workspaces
+- **Backend**: Node.js 20+, Express, Prisma 6, Socket.io, BullMQ, Zod
+- **Frontend**: Next.js 14+ (App Router), React 18+, Zustand, Tailwind CSS
+- **Shared**: TypeScript, Zod schemas
+
+## Folder Structure
+- `.cursor/` - Global Cursor configs (rules, skills, agents)
+- `apps/backend/cursor/` - Backend-specific configs
+- `apps/frontend/cursor/` - Frontend-specific configs
+- `apps/backend/` - Backend source
+- `apps/frontend/` - Frontend source
+- `packages/shared/` - Shared code (types, constants, utils, schemas)
+
+## Coding Principles
+1. **TypeScript first** - luôn dùng types, hạn chế `any`
+2. **DRY** - tái sử dụng code qua `packages/shared`
+3. **KISS** - code đơn giản, dễ đọc
+4. **YAGNI** - không code feature chưa cần
+5. **Separation of Concerns** - tách biệt rõ ràng các layer
+6. **Error handling** - luôn có try/catch, custom error classes
+7. **Validation** - validate input ở cả BE (Zod) và FE (React Hook Form + Zod)
+
+## Naming Conventions
+- **Files**: kebab-case cho files (`auth-service.ts`), PascalCase cho components (`AuthService.tsx`)
+- **Folders**: kebab-case
+- **Constants**: UPPER_SNAKE_CASE
+- **Variables/Functions**: camelCase
+- **Classes/Interfaces/Types**: PascalCase
+- **Booleans**: prefix `is`, `has`, `should` (`isLoading`, `hasError`)
+
+## Git Conventions
+- **Branch**: `feature/`, `fix/`, `chore/`, `docs/`, `refactor/`
+- **Commit**: Conventional Commits (`feat:`, `fix:`, `chore:`, `docs:`, `refactor:`)
+- **PR**: Mô tả rõ ràng, link issue, screenshot nếu có UI

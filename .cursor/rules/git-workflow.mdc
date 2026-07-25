@@ -1,0 +1,61 @@
+---
+description: Git workflow, commit conventions, and PR process
+globs: ["**/*"]
+alwaysApply: true
+---
+
+# Git Workflow
+
+## Branch Naming
+- `feature/<short-desc>` - new feature
+- `fix/<short-desc>` - bug fix
+- `chore/<short-desc>` - maintenance, deps
+- `docs/<short-desc>` - documentation
+- `refactor/<short-desc>` - refactoring
+- `hotfix/<short-desc>` - urgent production fix
+
+Example: `feature/auth-jwt`, `fix/login-validation`
+
+## Conventional Commits
+Format: `<type>(<scope>): <description>`
+
+**Types:**
+- `feat` - new feature
+- `fix` - bug fix
+- `chore` - maintenance, deps, config
+- `docs` - documentation only
+- `style` - formatting, missing semicolons
+- `refactor` - code change that neither fixes bug nor adds feature
+- `perf` - performance improvement
+- `test` - add or fix tests
+- `build` - build system, CI
+
+**Examples:**
+```
+feat(auth): add JWT refresh token rotation
+fix(posts): resolve null reference in posts query
+chore(deps): upgrade prisma to 6.1.0
+docs(readme): update setup instructions
+```
+
+**Rules:**
+- Subject ≤ 72 chars
+- Use imperative mood: "add" not "added"
+- No period at end
+- Body explains **why**, not what
+- Reference issues: `Closes #123`
+
+## Commit Workflow
+1. Stage specific files (không `git add .`)
+2. Write meaningful commit message
+3. Verify: `git status` clean before push
+4. Push to feature branch, NEVER to main
+
+## PR Process
+- Title: same as commit subject
+- Description: **What** + **Why** + **How to test**
+- Link related issues
+- Add screenshots/videos for UI changes
+- Request review from at least 1 person
+- All CI checks must pass
+- **NEVER** force push to main

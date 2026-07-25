@@ -1,0 +1,64 @@
+---
+description: Socket.io real-time patterns
+globs: ["apps/backend/src/sockets/**/*.ts"]
+alwaysApply: true
+---
+
+# Socket.io Patterns
+
+## Structure
+```
+sockets/
+├── index.ts          # Socket.io setup
+├── namespaces/       # Different namespaces (/chat, /notifications)
+├── handlers/         # Event handlers per namespace
+└── middlewares/      # Auth, rate limit
+```
+
+## Auth Middleware
+```typescript
+io.use(async (socket, next) => {
+  try {
+    const token = socket.handshake.auth.token;
+    const user = await verifyToken(token);
+    socket.data.user = user;
+    next();
+  } catch (err) {
+    next(new Error('Unauthorized'));
+  }
+});
+```
+
+## Namespace Pattern
+```typescript
+const chatNamespace = io.of('/chat');
+
+chatNamespace.on('connection', (socket) => {
+  const user = socket.data.user;
+
+  socket.on('message:send', async (data: SendMessageDTO) => {
+    try {
+      const message = await messageService.create(user.id, data);
+      chatNamespace.to(data.roomId).emit('message:received', message);
+    } catch (error) {
+      socket.emit('error', { message: error.message });
+    }
+  });
+
+  socket.on('disconnect', () => {
+    // Cleanup
+  });
+});
+```
+
+## Event Naming
+- Use `domain:action` format: `message:send`, `user:typing`, `room:joined`
+- Server-to-client: `message:received`, `notification:new`
+- Client-to-server: `message:send`, `room:join`
+
+## Best Practices
+- Always validate input (use same Zod schemas as REST)
+- Handle disconnect/cleanup
+- Use rooms for grouping (rooms, channels)
+- Emit to specific users: `socket.to(socketId).emit()`
+- Use rooms: `socket.join(roomId)`, `io.to(roomId).emit()`

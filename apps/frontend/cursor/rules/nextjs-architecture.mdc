@@ -1,0 +1,105 @@
+---
+description: Next.js 14 App Router architecture & best practices
+globs: ["apps/frontend/**/*.tsx", "apps/frontend/**/*.ts"]
+alwaysApply: true
+---
+
+# Frontend Architecture
+
+Stack: **Next.js 14+ (App Router) + React 18+ + Zustand + Tailwind CSS**
+
+## Server vs Client Components
+
+### Default: Server Components
+- Pages (`page.tsx`)
+- Layouts (`layout.tsx`)
+- Components that don't need interactivity
+
+```tsx
+// ✅ Server Component (default)
+export default async function PostsPage() {
+  const posts = await fetch('...').then(r => r.json());
+  return <PostList posts={posts} />;
+}
+```
+
+### Client Components: chỉ khi cần
+- Forms với onChange/onSubmit
+- State với useState, useEffect
+- Event handlers, browser APIs
+- Zustand stores, React Context
+- Hooks từ thư viện client-only
+
+```tsx
+'use client';
+
+import { useState } from 'react';
+
+export function Counter() {
+  const [count, setCount] = useState(0);
+  return <button onClick={() => setCount(c => c + 1)}>{count}</button>;
+}
+```
+
+## Folder Structure
+
+| Folder | Type | Purpose |
+|--------|------|---------|
+| `app/` | Router | Pages, layouts, API routes |
+| `components/ui/` | Server/Client | Base UI primitives (Button, Input) |
+| `components/common/` | Client | Shared compound components (Modal, Dropdown) |
+| `components/forms/` | Client | Form components (LoginForm) |
+| `components/layouts/` | Server | Header, Sidebar, Footer |
+| `components/features/` | Domain | Feature-specific (auth/, posts/, messages/) |
+| `hooks/` | - | Custom hooks |
+| `stores/` | Client | Zustand stores |
+| `services/` | - | API calls (axios) |
+| `providers/` | Client | Context providers (QueryClient, Theme) |
+| `lib/` | - | Third-party configs |
+| `utils/` | - | Pure helpers |
+| `types/` | - | TypeScript types |
+| `config/` | - | Runtime config |
+| `assets/` | - | SVGs, fonts (không phải public) |
+
+## Route Groups
+- `(auth)` - public auth pages, có layout riêng (no header)
+- `(dashboard)` - protected pages, cần auth check
+- `app/api/` - Next.js API routes (nếu cần)
+
+## Naming
+- Components: `PascalCase.tsx` (Button.tsx, PostCard.tsx)
+- Hooks: `use*.ts` (useAuth.ts, usePosts.ts)
+- Utilities: `camelCase.ts` (formatDate.ts)
+- Stores: `use*Store.ts` (useAuthStore.ts)
+
+## Data Fetching
+```tsx
+// ✅ Server Component - fetch directly
+async function PostsPage() {
+  const posts = await getPosts(); // Direct API call
+  return <PostList posts={posts} />;
+}
+
+// ✅ Client Component - use SWR/TanStack Query
+'use client';
+function PostsList() {
+  const { data, isLoading } = useSWR('/posts', fetcher);
+  if (isLoading) return <Skeleton />;
+  return <PostList posts={data} />;
+}
+
+// ❌ BAD: useEffect for data fetching
+'use client';
+function PostsList() {
+  const [posts, setPosts] = useState([]);
+  useEffect(() => { fetch('/api/posts').then(r => r.json()).then(setPosts); }, []);
+  // This loses SSR benefits!
+}
+```
+
+## State Management Decision Tree
+- **Local UI state** → `useState`
+- **Form state** → React Hook Form
+- **Global app state** (auth, theme) → Zustand
+- **Server state** (data from API) → SWR/TanStack Query
+- **URL state** → `useSearchParams`, `useRouter`

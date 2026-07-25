@@ -1,0 +1,157 @@
+---
+description: API services và state management (Zustand)
+globs: ["apps/frontend/src/services/**/*.ts", "apps/frontend/src/stores/**/*.ts"]
+alwaysApply: true
+---
+
+# API Services & State Management
+
+## Axios Setup
+
+```typescript
+// services/api/client.ts
+import axios from 'axios';
+
+export const apiClient = axios.create({
+  baseURL: process.env.NEXT_PUBLIC_API_URL,
+  timeout: 10000,
+  headers: { 'Content-Type': 'application/json' },
+});
+
+// Request interceptor - attach token
+apiClient.interceptors.request.use((config) => {
+  const token = useAuthStore.getState().accessToken;
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+// Response interceptor - handle errors, refresh token
+apiClient.interceptors.response.use(
+  (response) => response.data,
+  async (error) => {
+    if (error.response?.status === 401) {
+      // Refresh token logic
+    }
+    return Promise.reject(error);
+  }
+);
+```
+
+## Service Pattern
+
+```typescript
+// services/auth/auth.service.ts
+import { apiClient } from '@/services/api/client';
+import type { LoginDTO, AuthResponse } from '@e-clone/shared/types';
+
+export const authService = {
+  async login(dto: LoginDTO): Promise<AuthResponse> {
+    return apiClient.post('/auth/login', dto);
+  },
+
+  async register(dto: RegisterDTO): Promise<AuthResponse> {
+    return apiClient.post('/auth/register', dto);
+  },
+
+  async logout(): Promise<void> {
+    return apiClient.post('/auth/logout');
+  },
+
+  async me(): Promise<User> {
+    return apiClient.get('/auth/me');
+  },
+};
+```
+
+## Zustand Store Pattern
+
+```typescript
+// stores/useAuthStore.ts
+import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
+import type { User } from '@e-clone/shared/types';
+
+interface AuthState {
+  user: User | null;
+  accessToken: string | null;
+  isAuthenticated: boolean;
+  isLoading: boolean;
+
+  // Actions
+  setAuth: (user: User, accessToken: string) => void;
+  clearAuth: () => void;
+  setLoading: (loading: boolean) => void;
+}
+
+export const useAuthStore = create<AuthState>()(
+  persist(
+    (set) => ({
+      user: null,
+      accessToken: null,
+      isAuthenticated: false,
+      isLoading: false,
+
+      setAuth: (user, accessToken) =>
+        set({ user, accessToken, isAuthenticated: true }),
+
+      clearAuth: () =>
+        set({ user: null, accessToken: null, isAuthenticated: false }),
+
+      setLoading: (isLoading) => set({ isLoading }),
+    }),
+    {
+      name: 'auth-storage',
+      partialize: (state) => ({ accessToken: state.accessToken }),
+    }
+  )
+);
+```
+
+## Use stores correctly
+
+```tsx
+// ✅ GOOD: Select only what you need
+function UserMenu() {
+  const user = useAuthStore((state) => state.user);
+  const logout = useAuthStore((state) => state.logout);
+  // Re-renders chỉ khi user thay đổi
+}
+
+// ❌ BAD: Subscribe to whole store
+function UserMenu() {
+  const { user, logout } = useAuthStore();
+  // Re-renders khi bất kỳ field nào thay đổi
+}
+```
+
+## Data Fetching (SWR)
+
+```typescript
+// hooks/usePosts.ts
+import useSWR from 'swr';
+import { postService } from '@/services/posts';
+
+export function usePosts(page = 1) {
+  const { data, error, isLoading, mutate } = useSWR(
+    ['posts', page],
+    () => postService.list(page)
+  );
+
+  return {
+    posts: data?.data ?? [],
+    total: data?.meta?.total ?? 0,
+    isLoading,
+    isError: !!error,
+    refresh: mutate,
+  };
+}
+```
+
+## When to use what
+- **Zustand**: Auth state, UI state (modals, theme), global app state
+- **SWR/TanStack Query**: Server data (posts, comments, lists)
+- **useState**: Component-local UI state
+- **React Hook Form**: Form state
+- **URL params**: Filters, pagination, search

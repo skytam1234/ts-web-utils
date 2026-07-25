@@ -1,0 +1,239 @@
+---
+description: 5 gated verification passes cho clone - A (sanity) → B (computed-style) → C (visual diff) → D (adversarial) → E (lessons)
+globs: ["clone/**/*", ".clone-ui/**/*"]
+alwaysApply: false
+---
+
+# Clone Verification — 5 Gated Passes
+
+> Reference: santowilem/skills (clone-ui) Phase 5
+
+**Nếu finish mà không chạy cả 5 passes A-E → chưa done.** Self-verified clone = guess. Pass D mới là verified.
+
+Các passes complement each other — A finds khác drifts B, B finds khác D. Skip pass nào = class of drifts goes uncaught.
+
+| Pass | What | Cost | Catches |
+|------|------|------|---------|
+| **A** | Tokens + content sanity grep | Cheapest | Stray hex, missing headings, wrong asset types |
+| **B** | Computed-style parity (source vs clone, same payload) | Cheap | Color/spacing/typography mismatches eye smooths over |
+| **C** | Per-section visual diff loop (cap 3 iter/section) | Medium | Layout, structure, decorative pseudo-elements |
+| **D** | Adversarial sub-agent review | Medium | Hallucinations, regressions, blind-spot errors |
+| **E** | Drift report + lessons append | Cheap | Compounding learnings for next iter |
+
+## Open clone for screenshotting
+
+Need to render clone in browser before compare to source. Path differs by stack:
+
+| Stack | How to open |
+|-------|-------------|
+| **Plain HTML/CSS/JS** | `new_page` với `url: "file:///D:/path/to/index.html"`. No server. **Use forward slashes + fully-qualified `file://` URL.** Windows: `file:///D:/path/...` |
+| **Next.js / Vite / SvelteKit / Astro dev** | Ask user to start dev server (`pnpm dev`) on known port before Phase 5. Then `new_page` against `http://localhost:<port>`. If can't/don't → skip visual loop, document in Pass C. |
+| **Astro / static export** | Build (`npm run build`) + serve (`npx serve dist/`) on known port, then visit. |
+| **No way to render** | Skip visual loop, explicitly note "verification deferred". Don't pretend done. |
+
+For testing scenarios agent initiated (empty folder, plain output), `file://` URL always available since just wrote files. No excuse skip visual loop.
+
+## Pass A — Tokens-and-content sanity (cheap, run first)
+
+Before any visual screenshot, text-level sanity pass against Phase 3 artifacts:
+
+- Open `.clone-ui/plan/tokens.json`, search output for any **literal hex color** không có trong tokens file → drift
+- Open content inventory (Phase 2 verbatim capture), grep output for visible text từ mỗi section. Missing heading or stat number → drift
+- Open `.clone-ui/plan/assets.json`, confirm every listed asset referenced trong output. `hero.type === "video"` nhưng output có `<img>` cho hero → drift
+
+Catch what can here before paying for screenshot round-trip.
+
+## Pass B — Computed-style parity (programmatic)
+
+Visual diffs from screenshots miss small style mismatches eye smooths over (heading `#0d0d0d` vs `#101010`, padding `78px` vs `80px`, border-radius `4px` vs source's `10%` on 22×44 element). Fix: run **same `evaluate_script` payload** against both source + clone, literal-equality-diff JSON outputs.
+
+Steps:
+
+1. Open clone (file:// or localhost) in tab, source URL in another tab. Or sequential same tab (capture clone → save → navigate source → re-capture).
+2. Run **same payload** that produced `.clone-ui/source/section-styles.json` against clone, producing `.clone-ui/plan/clone-styles.json`. Use clone's selectors (mapped via `.clone-ui/plan/section-map.json[i].cloneSelector`).
+3. Diff 2 files. Build `.clone-ui/source/style-diff.json`:
+
+```json
+{
+  "header": {
+    "container.backgroundColor": { "source": "rgba(0, 0, 0, 0)", "clone": "rgb(255, 255, 255)" },
+    "headings[0].color":          { "source": "rgb(255, 255, 255)", "clone": "rgb(255, 255, 255)" }
+  }
+}
+```
+
+4. Every entry = drift. Fix all before Pass C — objective mismatches, not judgment calls.
+
+If `style-diff.json` empty → tokens/colors/spacing provably correct at captured selectors, spend Pass C iterations on layout/structure.
+
+### Common gotchas
+
+- `getComputedStyle` normalizes colors: `#101010` → `rgb(16, 16, 16)`. Compare normalized strings, not source markup.
+- `border-radius: 10%` resolves to different `px` per element size — diff is meaningful, not noise.
+- Pseudo-elements need separate query (`getComputedStyle(el, '::before')`); don't expect them in main payload.
+
+## Pass C — Per-section visual diff loop (iterate)
+
+Whole-page diffs miss subtleties: button slightly off-center inside section, watermark hiding behind hero. **Diff section-by-section using `.clone-ui/plan/section-map.json`** với loop scoped to current section:
+
+```
+For each section S in section-map.json:
+    For each viewport in [1440, 768, 375]:
+        1. Crop or re-capture source screenshot to S's bounding box
+        2. Take same-viewport screenshot of clone, scoped to S.cloneSelector
+        3. Walk diff checklist for S
+        4. List drifts
+        5. If drift count > 0 AND iteration < 2 (per-section cap):
+            a. Fix drift list in code (only edits inside S's scope)
+            b. Re-screenshot S
+            c. Re-diff
+            Loop back to step 4
+        6. If iteration >= 2, document remaining S drifts as known limitations
+After all sections converge or hit cap:
+    7. Take single full-page screenshot at 1440 of source vs clone as final sanity pass.
+       Catches inter-section issues like inconsistent vertical rhythm.
+```
+
+Bounded: max `sections × viewports × iterations = 10 × 3 × 2 = 60` screenshots. Per-section cap tighter (2) than flat cap (3) because section-scoped fixes smaller + converge faster.
+
+### Diff checklist (each viewport)
+
+Items prefixed **[CSS]** read from `.clone-ui/source/section-styles.json` / `.clone-ui/source/pseudo-elements.json` và compare against output's computed styles, not just visual screenshot.
+
+**Content + structure**
+- **Hero**: Same media type? (video vs static image vs gradient) Same headline copy verbatim? Same CTA buttons present?
+- **Section order**: Does clone have all sections source has, in same order? (Easy to drop whole section silently.)
+- **Section-level layout**: Carousel vs grid, 1-featured-plus-3-sides vs 4-equal-cards, etc.
+- **Stat numbers**: Visible counter values từ verbatim capture present? `200+` not `0+`.
+- **Form fields**: Field count, labels, AND full select-option lists match captured form-fields list? (15 Property Types means 15.)
+- **Headings**: Same text, similar size hierarchy?
+- **DOM structure for cards**: Badge position (absolute? inside image? overlay?), stat row order, title-vs-stats-vs-cta vertical order — all match `.clone-ui/source/raw.html`?
+- **No invented content**: Search clone output for any string not in `.clone-ui/source/raw.html` or content inventory. Disclaimers like "feed not loaded" / "requires API token" rendered into HTML are forbidden — flag + remove.
+
+**Style — read from computed-style files, don't eyeball**
+- **[CSS] Title color per section**: clone's heading `color` matches `section-styles.json[section].headings[0].color`? (Catches "section bg is pink, so I made title white" inversion.)
+- **[CSS] Button color contract**: bg + text color + hover state match per section? (Catches inverted-button drift.)
+- **[CSS] Container width**: clone's content-area `width` within ±5% of `section-styles.json[section].contentWidth` at 1440px? (Catches imposed-max-width drift.)
+- **[CSS] Tab/pill styling**: full border vs border-bottom only — match exactly?
+- **[CSS] Color palette**: Pulling from `.clone-ui/plan/tokens.json` only, no stray hexes?
+- **[CSS] Typography**: Same font family, same weight per role, exact `fontSize` per heading from `section-styles.json`?
+- **[CSS] Spacing**: Section padding within ~20%? Card gaps within ~4px?
+
+**Decorative + structural (easy to miss tier)**
+- **Pseudo-element backgrounds rendered**: every entry in `.clone-ui/source/pseudo-elements.json` với `backgroundImage` is **visually present** in clone (not just "the CSS rule exists"). Open clone in browser, screenshot section, confirm watermark/pattern visible.
+- **Section dividers**: every chevron/wave/cut SVG between sections in source is present in clone — count them and match.
+- **Form input icons**: every entry in `.clone-ui/plan/assets.json.formIcons` renders inside its input field — visible, not just declared in CSS.
+- **Background-image position**: news/feature sections with bg images at specific positions (e.g. "left-bottom") match — not defaulted to top-left.
+
+**Interactive behavior**
+- **Nav scroll states**: scroll clone 400px and confirm nav transitions match `nav-states.json` (transparent → solid, no shadow → shadow).
+- **Dropdown indicators**: nav items with submenus show carets next to text + open-state indicator on dropdown wrapper.
+- **Hover states**: buttons + cards have hover transitions; nav items reveal dropdown on hover.
+
+**Assets + fallbacks**
+- **Icons**: From source's icon system, or substituted? If substituted, flagged?
+- **Images**: From local `assets/` folder (downloaded from source), or replaced with placeholders? If placeholders, flagged?
+- **Header utility area**: phone numbers / search / CTAs that live in `<header>` outside `<nav>` are present.
+
+**Responsive**
+- **Mobile breakpoint**: Hamburger present, content stacks correctly, no horizontal overflow?
+
+**Footer-specific (commonly skipped)**
+Run entire checklist above on `footer` with same rigor as `hero`. Footer drifts that recurringly slip through:
+- **Social icon wrappers**: source flat glyph vs clone circular-pill — read computed `borderRadius` + `backgroundColor` of icon's parent `<div>`/`<a>`, not just icon itself.
+- **Contact info icon style**: small outlined glyph vs filled circle container — same check.
+- **Footer menu links**: bare `<a>` vs links với `›` prefix glyphs — search clone output for any chevron/arrow character not in `.clone-ui/source/raw.html`.
+- **Newsletter input**: bare borderless input vs filled-bg input + submit-button — match source's exact decoration.
+- **Footer watermark**: oversized brand-text or pattern as bg — must be in `pseudo-elements.json` extraction, must render visibly in clone.
+- **Logo treatment**: footer logo size/color often differs from header logo — read từ `section-styles.json["footer"]`, don't reuse header logo styling.
+
+## Pass D — Adversarial review (fresh sub-agent)
+
+Agent that implemented clone is worst auditor of own work — same biases, same blind spots, same "looks fine" reflex. Pass D breaks loop by spawning **fresh sub-agent** với no implementation context, only source artifacts + final output, tasked với **finding drifts**, not confirming success.
+
+```
+Agent({
+  description: "Adversarial clone-ui review",
+  subagent_type: "general-purpose",
+  prompt: `
+You are an adversarial reviewer. Another agent built a clone of {SOURCE_URL}; output is at {CLONE_PATH}. You did NOT implement it — your job is to find what's wrong, not to validate.
+
+Inputs available:
+- Source artifacts in {CLONE_PATH}/.clone-ui/source/  (raw.html, rendered.html, section-styles.json, pseudo-elements.json, nav-states.json, .captures/)
+- Plan artifacts in {CLONE_PATH}/.clone-ui/plan/  (section-map.json, section-evidence.json, tokens.json, embeds.json, assets.json)
+- Final output: {CLONE_PATH}/index.html (or framework equivalent), styles, JS, assets/
+
+Find at least 5 drifts. For each, cite:
+- Rendered feature in clone (file + line)
+- Source evidence that contradicts it (file + line in .clone-ui/source/)
+- Category: hallucination / inversion / structure-drift / asset-substitution / iteration-regression
+
+Specifically attack:
+1. Features clone renders that have NO entry in section-evidence.json (hallucination)
+2. Computed styles in clone that diverge from section-styles.json (inversion)
+3. DOM structure of cards/forms/nav/footer that differs from raw.html (structure drift)
+4. Assets in clone not present in assets.json, or assets.json entries not referenced (asset drift)
+5. If outputs-iterN-1-archive/ exists: features that were correct there but are wrong now (regression)
+
+Be specific. "The header looks off" is not a drift; "The .site-header backgroundColor in clone is rgb(255,255,255) but section-styles.json says rgba(0,0,0,0)" is a drift. Report under 400 words.
+
+**Use the Grep tool, NOT bash grep, for negative findings.** When verifying string is *not present* in captured file (e.g. 'this text was invented because it's not in rendered.html'), Grep (ripgrep) is locale-agnostic. Bash grep can fail silently on non-UTF8 Windows locales ('grep: -P supports only unibyte and UTF-8 locales') and produce false-negative drift claims.
+  `
+})
+```
+
+Sub-agent's output = source of truth for "what's actually broken." If ≥5 drifts → iter implementation against those (back to Pass C with new drift list). If 0-2 drifts after exhausting effort → converged, proceed to Pass E.
+
+**Why this works**: sub-agent has no investment in implementation being correct, no memory of "I struggled with this for 2 hours." Will read `.clone-ui/plan/section-evidence.json` và notice features in output not in it. That asymmetry = leverage.
+
+**Calibration note**: tell sub-agent to use Grep tool, not bash grep. Add this verbatim to Pass D prompt:
+
+> "When you need to verify a string is *not present* in captured file (e.g. 'this text was invented because it's not in rendered.html'), use **Grep tool** (ripgrep, locale-agnostic). Do NOT use Bash `grep` for negative findings — can fail silently and report 0 hits when string actually exists. Bash `grep` is fine for positive enumeration; for existence-check that drives hallucination drift, tool is required."
+
+**When to skip Pass D**: never. Even if A/B/C clean, run Pass D once — cost is one sub-agent call, upside is catching class of drifts implementer is structurally blind to (hallucinations, regressions). Only legitimate skip: genuinely can't spawn Agent (rare).
+
+## Pass E — Drift report + lessons append (only after all passes)
+
+After Passes A-D all converge or hit cap, produce written report:
+
+```markdown
+## Iteration 1 → 2 progression:
+  Fixed: stat counters now read 200+/300+/30 instead of 0+/0+/0
+  Fixed: hero is now <video> with poster fallback
+  Fixed (from Pass D): footer social icon container shape (square not circle)
+  Still drifting: testimonial widget content (not capturable from source)
+
+## Pass results:
+  A (sanity):   clean
+  B (computed): 0 entries in style-diff.json
+  C (visual):   converged at iter 2
+  D (adversarial): 1 drift found and fixed; second pass clean
+
+## Final drift list (known limitations):
+  - Why Us icons substituted with generic Lucide — source uses Elementor brand icons, asset URLs not resolvable
+  - Testimonials section: 8 reviews in source, mine shows 3 placeholders — Google review widget renders empty in static capture
+
+## No drift detected on:
+  - Color palette, typography, section order, form fields, footer layout
+```
+
+### Append to `.clone-ui/lessons.md`
+
+For each drift surfaced + fixed during this iteration (especially Pass D), append entry to `.clone-ui/lessons.md` using format:
+
+```markdown
+## YYYY-MM-DD — short title
+
+**Smell**: pattern that triggers drift (what to look for in source)
+**Failure**: what agent typically renders
+**Truth**: what source actually has
+**Mitigation**: concrete check to apply next iteration
+```
+
+Don't duplicate existing entries — refine or extend if similar. File plain markdown, append-only, kept under ~300 lines (consolidate older if grows).
+
+This = how skill compounds for given clone target: each iteration makes next iteration more accurate without SKILL.md edit.
+
+Lessons that recur across iterations indicate structural skill gap → flag in report, consider whether SKILL.md itself needs updating.
+
+**Contract**: nếu finish Phase 5 mà không chạy all 5 passes (A-E), bạn không done. Clone chỉ self-verified = guess. Pass D mới = verified clone.
